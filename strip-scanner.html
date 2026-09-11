@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#120E1C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Light strip code reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void:#120E1C;
+    --panel:#1D1730;
+    --edge:#3A2F5C;
+    --ink:#EDE7FF;
+    --dim:#9287B5;
+    --signal:#35E0C4;
+    --amber:#FFB13B;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--void);
+    color:var(--ink);
+    font-family:"Archivo",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    display:flex;justify-content:center;
+    padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  .app{
+    width:100%;max-width:520px;
+    display:flex;flex-direction:column;
+    padding:22px 20px 26px;gap:20px;
+  }
+
+  header h1{font-size:26px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+  header p{margin-top:7px;color:var(--dim);font-size:15px;line-height:1.45;max-width:44ch}
+
+  /* ---- viewfinder ---- */
+  .scope{
+    position:relative;border-radius:20px;overflow:hidden;
+    background:#0B0814;border:1px solid var(--edge);
+    aspect-ratio:3/4;min-height:0;flex:1;
+  }
+  video{width:100%;height:100%;object-fit:cover;display:block;background:#0B0814}
+
+  /* LED rails — the strip itself, top and bottom of the frame */
+  .rail{
+    position:absolute;left:0;right:0;height:14px;
+    display:flex;justify-content:space-around;align-items:center;
+    pointer-events:none;
+  }
+  .rail.top{top:16px} .rail.bottom{bottom:16px}
+  .rail i{
+    width:5px;height:5px;border-radius:50%;
+    background:var(--dim);opacity:.45;
+  }
+  .live .rail i{background:var(--signal);opacity:.3;animation:chase 1.4s linear infinite}
+  @keyframes chase{0%,70%{opacity:.25}35%{opacity:1}}
+
+  .reticle{position:absolute;inset:42px 26px;pointer-events:none}
+  .reticle b{position:absolute;width:26px;height:26px;border:2px solid var(--ink);opacity:.55}
+  .reticle b:nth-child(1){top:0;left:0;border-right:0;border-bottom:0;border-radius:6px 0 0 0}
+  .reticle b:nth-child(2){top:0;right:0;border-left:0;border-bottom:0;border-radius:0 6px 0 0}
+  .reticle b:nth-child(3){bottom:0;left:0;border-right:0;border-top:0;border-radius:0 0 0 6px}
+  .reticle b:nth-child(4){bottom:0;right:0;border-left:0;border-top:0;border-radius:0 0 6px 0}
+  .live .reticle b{border-color:var(--signal);opacity:.9}
+
+  .idle-note{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;padding:34px;color:var(--dim);font-size:15px;line-height:1.5;
+  }
+  .live .idle-note{display:none}
+
+  /* ---- controls ---- */
+  .btn{
+    width:100%;border:0;border-radius:14px;padding:17px;
+    font:600 17px/1 "Archivo",sans-serif;color:#0D0A16;background:var(--signal);
+    cursor:pointer;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--edge)}
+  .btn:focus-visible{outline:3px solid var(--amber);outline-offset:3px}
+  .quiet{
+    display:block;width:100%;background:none;border:0;color:var(--dim);
+    font:400 15px/1 "Archivo",sans-serif;text-decoration:underline;
+    text-underline-offset:4px;padding:12px;cursor:pointer;
+  }
+
+  .status{font-size:14px;color:var(--dim);min-height:20px;line-height:1.4}
+  .status.bad{color:var(--amber)}
+
+  /* ---- result ---- */
+  .result{
+    border:1px solid var(--edge);border-radius:18px;background:var(--panel);
+    padding:20px;display:none;
+  }
+  .result.shown{display:block;animation:rise .28s ease-out}
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+  }
+  .result h2{font-size:15px;font-weight:600;color:var(--signal)}
+  .code{
+    font-family:var(--mono);font-size:24px;line-height:1.35;
+    word-break:break-all;margin:10px 0 4px;user-select:all;
+  }
+  .code a{color:var(--ink)}
+  .meta{font-size:13px;color:var(--dim);font-family:var(--mono)}
+  .result .row{display:flex;gap:10px;margin-top:16px}
+  .result .row .btn{padding:13px;font-size:15px}
+
+  .fallback{display:none;gap:10px;flex-direction:column}
+  .fallback.shown{display:flex}
+  .fallback input{
+    width:100%;padding:16px;border-radius:14px;border:1px solid var(--edge);
+    background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:18px;
+  }
+  .fallback input:focus{outline:2px solid var(--signal);outline-offset:1px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <h1>Read the sticker on your light strip</h1>
+    <p>Point the camera at the barcode or QR code on the back of the controller box. Hold steady about 15&nbsp;cm away in good light.</p>
+  </header>
+
+  <div class="scope" id="scope">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="rail top"></div>
+    <div class="rail bottom"></div>
+    <div class="reticle"><b></b><b></b><b></b><b></b></div>
+    <div class="idle-note" id="idleNote">Camera is off</div>
+  </div>
+
+  <div>
+    <button class="btn" id="toggle">Start camera</button>
+    <button class="quiet" id="manualToggle">Type the numbers instead</button>
+    <p class="status" id="status"></p>
+  </div>
+
+  <div class="fallback" id="fallback">
+    <input id="manualInput" inputmode="text" autocomplete="off" placeholder="e.g. 6941234567890">
+    <button class="btn ghost" id="manualSave">Use this code</button>
+  </div>
+
+  <section class="result" id="result" aria-live="polite">
+    <h2 id="resultTitle">Found a code</h2>
+    <p class="code" id="codeOut"></p>
+    <p class="meta" id="formatOut"></p>
+    <div class="row">
+      <button class="btn ghost" id="copyBtn">Copy</button>
+      <button class="btn" id="againBtn">Scan again</button>
+    </div>
+  </section>
+
+</div>
+
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+(function(){
+  var scope   = document.getElementById('scope');
+  var video   = document.getElementById('video');
+  var toggle  = document.getElementById('toggle');
+  var statusEl= document.getElementById('status');
+  var result  = document.getElementById('result');
+  var codeOut = document.getElementById('codeOut');
+  var fmtOut  = document.getElementById('formatOut');
+  var idleNote= document.getElementById('idleNote');
+  var fallback= document.getElementById('fallback');
+
+  var reader = null, running = false, lastValue = '';
+
+  // Build the LED dot rails.
+  document.querySelectorAll('.rail').forEach(function(rail){
+    for(var i=0;i<16;i++){
+      var d = document.createElement('i');
+      d.style.animationDelay = (i*0.07)+'s';
+      rail.appendChild(d);
+    }
+  });
+
+  function say(msg, bad){
+    statusEl.textContent = msg || '';
+    statusEl.className = 'status' + (bad ? ' bad' : '');
+  }
+
+  if(!window.isSecureContext){
+    say('This page has to be served over https:// for the camera to turn on. Opening the file directly won’t work.', true);
+    toggle.disabled = true;
+    idleNote.textContent = 'Camera needs an https:// address';
+  }
+
+  function start(){
+    if(typeof ZXing === 'undefined'){
+      say('The barcode library didn’t load. Check the connection and reload.', true);
+      return;
+    }
+    say('Asking for the camera…');
+    reader = new ZXing.BrowserMultiFormatReader();
+    reader.decodeFromConstraints(
+      { video: { facingMode: { ideal: 'environment' }, width:{ideal:1280}, height:{ideal:720} } },
+      video,
+      function(res, err){
+        if(res){
+          var text = res.getText();
+          if(text === lastValue) return;
+          lastValue = text;
+          show(text, res.getBarcodeFormat ? String(res.getBarcodeFormat()) : '');
+        }
+      }
+    ).then(function(){
+      running = true;
+      scope.classList.add('live');
+      toggle.textContent = 'Stop camera';
+      say('Scanning. Move slowly across the barcode.');
+    }).catch(function(e){
+      var n = e && e.name;
+      if(n === 'NotAllowedError'){
+        say('Camera access was blocked. In Chrome: tap ⋯ → Settings → Site Settings → Camera, allow it for this site, then reload.', true);
+      } else if(n === 'NotFoundError'){
+        say('No camera found on this device.', true);
+      } else {
+        say('Couldn’t start the camera: ' + (e && e.message ? e.message : 'unknown error'), true);
+      }
+    });
+  }
+
+  function stop(){
+    if(reader){ try{ reader.reset(); }catch(e){} }
+    running = false;
+    scope.classList.remove('live');
+    toggle.textContent = 'Start camera';
+    idleNote.textContent = 'Camera is off';
+  }
+
+  var FORMATS = {
+    'EAN_13':'EAN-13 · retail product code',
+    'EAN_8':'EAN-8 · retail product code',
+    'UPC_A':'UPC-A · retail product code',
+    'UPC_E':'UPC-E · retail product code',
+    'CODE_128':'Code 128 · usually a serial or model number',
+    'CODE_39':'Code 39 · usually a serial or model number',
+    'QR_CODE':'QR code',
+    'DATA_MATRIX':'Data Matrix'
+  };
+
+  function show(text, fmtKey){
+    stop();
+    var isUrl = /^https?:\/\//i.test(text.trim());
+    codeOut.innerHTML = '';
+    if(isUrl){
+      var a = document.createElement('a');
+      a.href = text.trim(); a.textContent = text.trim();
+      a.rel = 'noopener noreferrer'; a.target = '_blank';
+      codeOut.appendChild(a);
+    } else {
+      codeOut.textContent = text;
+    }
+    fmtOut.textContent = FORMATS[fmtKey] || (fmtKey ? fmtKey.replace(/_/g,' ') : 'Entered by hand');
+    result.classList.add('shown');
+    say(isUrl ? 'That’s a link — where it points tells you which app and chipset the strip uses.' : '');
+    result.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+
+  toggle.addEventListener('click', function(){
+    if(running){ stop(); say(''); } else { lastValue=''; start(); }
+  });
+
+  document.getElementById('againBtn').addEventListener('click', function(){
+    result.classList.remove('shown');
+    lastValue = '';
+    start();
+  });
+
+  document.getElementById('copyBtn').addEventListener('click', function(){
+    var txt = codeOut.textContent;
+    if(navigator.clipboard){
+      navigator.clipboard.writeText(txt).then(function(){ say('Copied.'); },
+        function(){ say('Copy didn’t work — press and hold the code to select it.', true); });
+    } else {
+      say('Press and hold the code to select it.', true);
+    }
+  });
+
+  document.getElementById('manualToggle').addEventListener('click', function(){
+    fallback.classList.toggle('shown');
+    if(fallback.classList.contains('shown')) document.getElementById('manualInput').focus();
+  });
+
+  document.getElementById('manualSave').addEventListener('click', function(){
+    var v = document.getElementById('manualInput').value.trim();
+    if(!v){ say('Type the digits printed under the barcode first.', true); return; }
+    show(v, '');
+  });
+
+  window.addEventListener('pagehide', stop);
+})();
+</script>
+</body>
+</html>
